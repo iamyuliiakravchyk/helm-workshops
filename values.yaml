@@ -1,0 +1,97 @@
+# Frontend settings
+frontend:
+  name: frontend
+  label: frontend
+  replicaCount: 2
+  image:
+    repository: nginx
+    tag: "1.25"
+  probesPath: /healthz
+  port:
+    container:
+      name: http
+      value: 80
+    service:
+      name: http
+      value: 80
+  serviceAccount:
+    name: frontend
+
+# Backend settings
+backend:
+  name: backend
+  label: backend
+  replicaCount: 2
+  image:
+    repository: adminer
+    tag: "4"
+  probesPath: /
+  port:
+    container:
+      name: http
+      value: 8080
+    service:
+      name: http
+      value: 80
+  serviceAccount:
+    name: backend
+
+# Database settings
+database:
+  name: database
+  label: database
+  replicaCount: 1
+  image:
+    repository: postgres
+    tag: "16"
+  port:
+    container:
+      name: postgres
+      value: 5432
+    service:
+      name: postgres
+      value: 5432
+  serviceAccount:
+    name: database
+  resources:
+    requests:
+      cpu: 10m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 512Mi
+  probes:
+    enabled: true
+    liveness:
+      initialDelaySeconds: 30
+      failureThreshold: 6
+      periodSeconds: 10
+    readiness:
+      initialDelaySeconds: 5
+      failureThreshold: 3
+      periodSeconds: 5
+  PVC:
+    storage: 1Gi
+
+imagePullPolicy: IfNotPresent
+service:
+  type: ClusterIP
+
+# Resource requests and limits
+resources:
+  requests:
+    cpu: 10m
+    memory: 32Mi
+  limits:
+    cpu: 200m
+    memory: 128Mi
+
+# Health check probes configuration
+probes:
+  enabled: true
+  liveness:
+    initialDelaySeconds: 10
+    periodSeconds: 10
+  readiness:
+    initialDelaySeconds: 2
+    periodSeconds: 5

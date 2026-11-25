@@ -1,0 +1,105 @@
+{{- $fe := .Values.frontend }}
+{{- $cmName := printf "%s-config" $fe.name }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $cmName }}
+  labels:
+    app: {{ $fe.label }}
+data:
+  backend_host: {{ .Values.backend.name }}.{{ .Release.Namespace }}.svc.cluster.local
+
+  default.conf.template: |
+    server {
+        listen {{ $fe.port.container.value }};
+        server_name _;
+    
+        location = /healthz {
+            default_type text/plain;
+            return 200 "ok";
+        }
+    
+        location / {
+            proxy_pass http://${WORKSHOP_BACKEND_HOST}:{{ .Values.backend.port.service.value }}/;
+            proxy_set_header Host $host;
+            add_header X-Frontend-Pod $hostname always;
+        }
+    }
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fe.name }}
+  labels:
+    app: {{ $fe.label }}
+spec:
+  replicas: {{ $fe.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ $fe.label }}
+  template:
+    metadata:
+      labels:
+        app: {{ $fe.label }}
+    spec:
+      serviceAccountName: {{ $fe.serviceAccount.name }}
+      containers:
+        - name: nginx
+          image: {{ $fe.image.repository }}:{{ $fe.image.tag }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          ports:
+            - name: {{ $fe.port.container.name }}
+              containerPort: {{ $fe.port.container.value }}
+
+          env:
+            - name: NGINX_ENVSUBST_FILTER
+              value: "WORKSHOP_"
+            - name: WORKSHOP_BACKEND_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ $cmName }}
+                  key: backend_host
+
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nginx/templates
+              readOnly: true
+
+          {{- if .Values.probes.enabled }}
+          livenessProbe:
+            httpGet:
+              path: {{ $fe.probesPath }}
+              port: {{ $fe.port.container.name }}
+            {{- toYaml .Values.probes.liveness | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: {{ $fe.probesPath }}
+              port: {{ $fe.port.container.name }}
+            {{- toYaml .Values.probes.readiness | nindent 12 }}
+          {{- end }}
+
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $cmName }}
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fe.name }}
+  labels:
+    app: {{ $fe.label }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    app: {{ $fe.label }}
+  ports:
+    - name: {{ $fe.port.service.name }}
+      port: {{ $fe.port.service.value }}
+      targetPort: {{ $fe.port.container.name }}

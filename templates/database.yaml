@@ -1,0 +1,103 @@
+{{- $db := .Values.database }}
+{{- $pvcName := "db-data" }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $pvcName }}
+  labels:
+    app: {{ $db.label }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ $db.PVC.storage }}
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $db.name }}
+  labels:
+    app: {{ $db.label }}
+spec:
+  replicas: {{ $db.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: {{ $db.label }}
+  template:
+    metadata:
+      labels:
+        app: {{ $db.label }}
+    spec:
+      serviceAccountName: {{ $db.serviceAccount.name }}
+      containers:
+        - name: postgres
+          image: {{ $db.image.repository }}:{{ $db.image.tag }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          ports:
+            - name: {{ $db.port.container.name }}
+              containerPort: {{ $db.port.container.value }}
+
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: username
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: password
+            - name: POSTGRES_DB
+              value: "appdb"
+
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+
+          {{- if $db.probes.enabled }}
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            {{- toYaml $db.probes.readiness | nindent 12 }}
+
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            {{- toYaml $db.probes.liveness | nindent 12 }}
+          {{- end }}
+
+          resources: {{- toYaml $db.resources | nindent 12 }}
+
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ $pvcName }}
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $db.name }}
+  labels:
+    app: {{ $db.label }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    app: {{ $db.label }}
+  ports:
+    - name: {{ $db.port.service.name }}
+      port: {{ $db.port.service.value }}
+      targetPort: {{ $db.port.container.name }}

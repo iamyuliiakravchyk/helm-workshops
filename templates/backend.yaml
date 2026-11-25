@@ -1,0 +1,87 @@
+{{- $be := .Values.backend }}
+{{- $cmName := printf "%s-config" $be.name }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $cmName }}
+  labels:
+    app: {{ $be.label }}
+data:
+  db_host: {{ .Values.database.name }}.{{ .Release.Namespace }}.svc.cluster.local
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $be.name }}
+  labels:
+    app: {{ $be.label }}
+spec:
+  replicas: {{ $be.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ $be.label }}
+  template:
+    metadata:
+      labels:
+        app: {{ $be.label }}
+    spec:
+      serviceAccountName: {{ $be.serviceAccount.name }}
+      containers:
+        - name: adminer
+          image: {{ $be.image.repository }}:{{ $be.image.tag }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          ports:
+            - name: {{ $be.port.container.name }}
+              containerPort: {{ $be.port.container.value }}
+
+          env:
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: username
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: password
+            - name: ADMINER_DEFAULT_SERVER
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ $cmName }}
+                  key: db_host
+
+          {{- if .Values.probes.enabled }}
+          readinessProbe:
+            httpGet:
+              path: {{ $be.probesPath }}
+              port: {{ $be.port.container.name }}
+            {{- toYaml .Values.probes.readiness | nindent 12 }}
+
+          livenessProbe:
+            httpGet:
+              path: {{ $be.probesPath }}
+              port: {{ $be.port.container.name }}
+            {{- toYaml .Values.probes.liveness | nindent 12 }}
+          {{- end }}
+
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $be.name }}
+  labels:
+    app: {{ $be.label }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    app: {{ $be.label }}
+  ports:
+    - name: {{ $be.port.service.name }}
+      port: {{ $be.port.service.value }}
+      targetPort: {{ $be.port.container.name }}
